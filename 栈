@@ -1,0 +1,13 @@
+import java.util.stack;
+public class stackDemo{
+ public static void main (String[] args){
+    stack<Interge> stack = new stack<>();
+    stack.push(item: 1);
+    stack.push(item: 2);
+    stack.push(item: 3);
+    stack.push(item: 4);
+    while (!stack.isEmpty()){
+        System.out.println(stack.pop);
+        }
+       }
+     }
