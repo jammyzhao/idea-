@@ -1,0 +1,18 @@
+public class DiGui {
+	public  static  void printNumber(int num){
+		if (num < 10){
+			System.out.printf ("%d",num);
+			//return num;
+		}
+		else{
+			int m = num / 10 ;
+			printNumber(m);
+			int o = num% 10;
+			System.out.printf("%d", num);
+		}
+	}		
+			
+    public  static void main(String [] args) {
+		int num = 865 ;
+	System.out.println(num);
+	}
