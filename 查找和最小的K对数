@@ -1,0 +1,21 @@
+   vector<vector<int>> res;
+          int len1=nums1.size(),len2=nums2.size();
+          if(len1==0 or len2==0){return res;}
+          vector<int> memo(len1,-1);
+          //memo[i]指示：{nums1[i],nums2[j]}元素对中上次已经放入结果数组那个的j的值，i对应第一个未使用的j为memo[i]+1
+          auto cmp=[&](int x,int y){return nums1[x]+nums2[memo[x]+1]>nums1[y]+nums2[memo[y]+1];};
+        priority_queue<int,vector<int>,decltype(cmp)> min_heap(cmp);//小顶堆
+         for(int i=0;i<len1;++i){
+             min_heap.push(i);
+         }
+         while(res.size()<k and not min_heap.empty()){//每次循环把小顶堆的堆顶（也就是目前的最小对）push进结果
+             int tp=min_heap.top();
+             min_heap.pop();
+             res.push_back({nums1[tp],nums2[memo[tp]+1]});
+             memo[tp]+=1;                            //memo[tp]+1已经遍历，所以memo[tp]+=1；
+             if(memo[tp]<len2-1){                    //如果tp对应nums2中的索引到达nums2尾部，那就不push了
+                 min_heap.push(tp);
+             }
+         }
+       return res;
+    }
