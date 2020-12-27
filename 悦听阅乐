@@ -1,0 +1,643 @@
+****************************audiodao
+public class AudioDao {
+    public void insert(int sid, String uuid, String contentType, InputStream inputStream) throws SQLException {
+        String sql = "insert into audios (sid, uuid, content_type, content) values (?, ?, ?, ?)";
+
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                s.setInt(1, sid);
+                s.setString(2, uuid);
+                s.setString(3, contentType);
+                s.setBlob(4, inputStream);
+
+                s.executeUpdate();
+            }
+        }
+    }
+
+    public Audio select(String uuid) throws SQLException {
+        String sql = "select content_type, content from audios where uuid = ?";
+
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                s.setString(1, uuid);
+
+                try (ResultSet r = s.executeQuery()) {
+                    if (!r.next()) {
+                        return null;
+                    }
+
+                    return new Audio(r.getString("content_type"), r.getBinaryStream("content"));
+                }
+            }
+        }
+    }
+}
+*************************
+public class BookDao {
+    public Book insert(User user, String title) throws SQLException {
+        String sql = "insert into books (uid, title) values (?, ?)";
+
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                s.setInt(1, user.uid);
+                s.setString(2, title);
+
+                s.executeUpdate();
+
+                try (ResultSet r = s.getGeneratedKeys()) {
+                    if (!r.next()) {
+                        return null;
+                    }
+
+                    return new Book(r.getInt(1), user, title);
+                }
+            }
+        }
+    }
+
+    public List<Book> selectAll() throws SQLException {
+        // 联表查询
+        String sql = "select bid, title, users.uid, users.username " +
+                "from books, users " +
+                "where books.uid = users.uid " +
+                "order by bid desc";
+
+        List<Book> books = new ArrayList<>();
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                try (ResultSet r = s.executeQuery()) {
+                    while (r.next()) {
+                        User user = new User(r.getInt("uid"), r.getString("username"));
+                        Book book = new Book(r.getInt("bid"), user, r.getString("title"));
+
+                        books.add(book);
+                    }
+                }
+            }
+        }
+        return books;
+    }
+
+    public Book selectByBid(int bid) throws SQLException {
+        String sql = "select bid, title, users.uid, users.username " +
+                "from books, users " +
+                "where books.uid = users.uid and bid = ?";
+
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                s.setInt(1, bid);
+
+                try (ResultSet r = s.executeQuery()) {
+                    if (!r.next()) {
+                        return null;
+                    }
+
+                    User user = new User(r.getInt("uid"), r.getString("username"));
+                    return new Book(r.getInt("bid"), user, r.getString("title"));
+                }
+            }
+        }
+    }
+}
+*******************************************
+public class SectionDao {
+    public void insert(int bid, String name) throws SQLException {
+        String sql = "insert into sections (bid, name) values (?, ?)";
+
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                s.setInt(1, bid);
+                s.setString(2, name);
+
+                s.executeUpdate();
+            }
+        }
+    }
+
+    public List<Section> selectByBid(int bid) throws SQLException {
+        // 必须用左联查询，自己思考为什么！
+        String sql = "select sections.sid, uuid, name " +
+                "from sections left join audios on sections.sid = audios.sid " +
+                "where bid = ? order by sections.sid";
+        List<Section> sections = new ArrayList<>();
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                s.setInt(1, bid);
+
+                try (ResultSet r = s.executeQuery()) {
+                    while (r.next()) {
+                        Section section = new Section(
+                                r.getInt("sid"),
+                                r.getString("uuid"),
+                                r.getString("name")
+                        );
+                        sections.add(section);
+                    }
+                }
+            }
+        }
+
+        return sections;
+    }
+}
+******************************************
+/**
+ * Java 代码表示的 INSERT/UPDATE/DELETE/SELECT
+ *
+ * 关于用户的密码，不要保存明文密码（peixinchen/123）
+ * 如果数据从你这里泄露了，则所有用户的密码也跟着全部泄露了
+ * 一般都是保存做完 hash 的密码（这里选择 sha-256 这个hash算法）
+ */
+public class UserDao {
+    public User insert(String username, String plainPassword) throws SQLException {
+        String password = encrypt(plainPassword);
+
+        String sql = "insert into users (username, password) values (?, ?)";
+
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                s.setString(1, username);
+                s.setString(2, password);
+
+                s.executeUpdate();
+
+                try (ResultSet r = s.getGeneratedKeys()) {
+                    if (!r.next()) {
+                        return null;
+                    }
+
+                    return new User(r.getInt(1), username);
+                }
+            }
+        }
+    }
+
+    public User select(String username, String plainPassword) throws SQLException {
+        String password = encrypt(plainPassword);
+
+        String sql = "select uid from users where username = ? and password = ?";
+
+        try (Connection c = DB.getConnection()) {
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                s.setString(1, username);
+                s.setString(2, password);
+
+                try (ResultSet r = s.executeQuery()) {
+                    if (!r.next()) {
+                        return null;
+                    }
+
+                    return new User(r.getInt(1), username);
+                }
+            }
+        }
+    }
+
+    // 这个做法实际上也不适合生产环境真正使用
+    // 但至少比明文的情况要安全一点
+    private String encrypt(String plain) {
+        try {
+            MessageDigest messageDigest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = plain.getBytes();
+            byte[] digest = messageDigest.digest(bytes);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void main(String[] args) {
+        String a = "123";
+        UserDao userDao = new UserDao();
+        String encrypt = userDao.encrypt(a);
+        System.out.println(encrypt);
+    }
+}
+**********************************************************
+public class Audio {
+    public String contentType;
+    public InputStream inputStream;
+**************************************************************
+public class Book {
+    public int bid;
+    public User user;
+    public String title;
+    public List<Section> sections;
+
+    public Book() {
+        this.sections = new ArrayList<>();
+    }
+
+    public Book(int bid, User user, String title) {
+        this.bid = bid;
+        this.user = user;
+        this.title = title;
+        this.sections = new ArrayList<>();
+    }
+
+    @Override
+    public String toString() {
+        return "Book{" +
+                "bid=" + bid +
+                ", user=" + user +
+                ", title='" + title + '\'' +
+                ", sections=" + sections +
+                '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Book)) return false;
+        Book book = (Book) o;
+        return bid == book.bid &&
+                Objects.equals(user, book.user) &&
+                Objects.equals(title, book.title) &&
+                Objects.equals(sections, book.sections);
+    }
+
+    @Override
+    public int hashCode() {
+
+        return Objects.hash(bid, user, title, sections);
+    }
+}
+************************************************
+public class Section {
+    public int sid;
+    public String name;
+    // 如果关联声音，uuid 就是保存声音的 uuid
+    // 否则，uuid == null
+    public String uuid;
+
+    public Section() {
+    }
+
+    public Section(int sid, String uuid, String name) {
+        this.sid = sid;
+        this.uuid = uuid;
+        this.name = name;
+    }
+
+    @Override
+    public String toString() {
+        return "Section{" +
+                "uuid='" + uuid + '\'' +
+                "name='" + name + '\'' +
+                '}';
+    }
+}
+********************************************
+**
+ * 一般来说，model 这类对象，都需要覆写
+ * 1. toString
+ * 2. equals
+ * 3. hashCode
+ */
+public class User {
+    public int uid;
+    public String username;
+
+    public User() {
+    }
+
+    public User(int uid, String username) {
+        this.uid = uid;
+        this.username = username;
+    }
+
+    @Override
+    public String toString() {
+        return "User{" +
+                "uid=" + uid +
+                ", username='" + username + '\'' +
+                '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;     // 两个引用是不是指向同一个对象
+        if (!(o instanceof User)) return false; // 两个对象的类型是否一致
+        User user = (User) o;                   // 判断重要属性是否一样
+        return uid == user.uid &&
+                Objects.equals(username, user.username);
+    }
+
+    @Override
+    public int hashCode() {
+
+        return Objects.hash(uid, username);
+    }
+}
+*********************************************************
+public class AudioService {
+    private AudioDao audioDao;
+
+    public AudioService() {
+        audioDao = new AudioDao();
+    }
+
+    public String save(int sid, Part audio) throws IOException, SQLException {
+        String uuid = UUID.randomUUID().toString();
+
+        audioDao.insert(sid, uuid, audio.getContentType(), audio.getInputStream());
+
+        return uuid;
+    }
+
+    public Audio get(String uuid) throws SQLException {
+        return audioDao.select(uuid);
+    }
+}
+************************************************************
+public class BookService {
+    private BookDao bookDao;
+    private SectionDao sectionDao;
+
+    public BookService() {
+        bookDao = new BookDao();
+        sectionDao = new SectionDao();
+    }
+
+    public List<Book> list() throws SQLException {
+        return bookDao.selectAll();
+    }
+
+    public Book post(String title, User user) throws SQLException {
+        return bookDao.insert(user, title);
+    }
+
+    public Book get(int bid) throws SQLException {
+        Book book = bookDao.selectByBid(bid);
+        if (book == null) {
+            return null;
+        }
+        book.sections = sectionDao.selectByBid(bid);
+
+        return book;
+    }
+
+    public void addSection(int bid, String name) throws SQLException {
+        sectionDao.insert(bid, name);
+    }
+}
+**************************************************
+public class UserService {
+    private UserDao userDao;
+
+    public UserService() {
+        userDao = new UserDao();
+    }
+
+    public User register(String username, String password) throws SQLException {
+        return userDao.insert(username, password);
+    }
+
+    public User login(String username, String password) throws SQLException {
+        return userDao.select(username, password);
+    }
+}
+**********************************************************
+@WebServlet("/audio/get")
+public class AudioGetServlet extends HttpServlet {
+    private AudioService audioService;
+
+    @Override
+    public void init() throws ServletException {
+        audioService = new AudioService();
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("utf-8");
+        String uuid = req.getParameter("uuid");
+
+        Audio audio = null;
+        try {
+            audio = audioService.get(uuid);
+            if (audio == null) {
+                resp.sendError(404, "没有这段声音");
+                return;
+            }
+        } catch (SQLException e) {
+            throw new ServletException(e);
+        }
+
+        resp.setContentType(audio.contentType);
+        ServletOutputStream outputStream = resp.getOutputStream();
+        byte[] buf = new byte[1024];
+        int len;
+
+        while ((len = audio.inputStream.read(buf)) != -1) {
+            outputStream.write(buf, 0, len);
+        }
+        audio.inputStream.close();
+    }
+}
+***********************************************************
+@MultipartConfig
+@WebServlet("/upload/audio")
+public class AudioUploadServlet extends HttpServlet {
+    private AudioService audioService;
+
+    @Override
+    public void init() throws ServletException {
+        audioService = new AudioService();
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("utf-8");
+
+        String s = req.getParameter("sid");
+        // s = null
+        int sid = Integer.parseInt(s);
+
+        Part audio = req.getPart("audio");
+        // 通过这个输入流，就可以读取到声音的所有数据
+        // InputStream inputStream = audio.getInputStream();
+
+        // 1. 保存声音，得到声音的 uuid，同时关联 sid
+        resp.setContentType("utf-8");
+        resp.setContentType("application/json");
+        PrintWriter writer = resp.getWriter();
+        try {
+            String uuid = audioService.save(sid, audio);
+            writer.printf("{\"uuid\": \"%s\"}%n", uuid);
+        } catch (SQLException e) {
+            e.printStackTrace();
+            resp.setStatus(500);
+            writer.printf("{\"reason\": \"%s\"}%n", e.getMessage());
+        }
+    }
+}
+***********************************************
+@WebServlet("/post-book")
+public class BookPostServlet extends HttpServlet {
+    private BookService bookService;
+
+    @Override
+    public void init() throws ServletException {
+        bookService = new BookService();
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("utf-8");
+        String title = req.getParameter("title");
+
+        HttpSession session = req.getSession();
+        User user = (User) session.getAttribute("user");
+        if (user == null) {
+            resp.sendRedirect("/login.html");
+            return;
+        }
+
+        try {
+            Book book = bookService.post(title, user);
+            if (book != null) {
+                resp.sendRedirect("/book.jsp?bid=" + book.bid);
+            } else {
+                resp.sendRedirect("/add-book.jsp");
+            }
+        } catch (SQLException e) {
+            throw new ServletException(e);
+        }
+    }
+}
+****************************************
+@WebServlet("/post-section")
+public class SectionPostServlet extends HttpServlet {
+    private BookService bookService;
+
+    @Override
+    public void init() throws ServletException {
+        bookService = new BookService();
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("utf-8");
+        int bid = Integer.parseInt(req.getParameter("bid"));
+        String name = req.getParameter("name");
+
+        try {
+            bookService.addSection(bid, name);
+        } catch (SQLException e) {
+            throw new ServletException(e);
+        }
+
+        resp.sendRedirect("/book.jsp?bid=" + bid);
+    }
+}
+***********************************************************
+@WebServlet("/login")
+public class UserLoginServlet extends HttpServlet {
+    private UserService userService;
+
+    @Override
+    public void init() throws ServletException {
+        userService = new UserService();
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("utf-8");
+
+        String username = req.getParameter("username");
+        String password = req.getParameter("password");
+        // 没有做参数正确性检查
+
+        try {
+            User user = userService.login(username, password);
+            if (user == null) {
+                // 没有注册成功
+                // 没有做太多易用性考虑：没有告诉用户错误原因
+                resp.sendRedirect("/login.html");
+                return;
+            }
+
+            // 把当前用户种入 session 中，下次资源访问时携带的登陆用户信息
+            HttpSession session = req.getSession();
+            session.setAttribute("user", user);
+
+            // 跳转回首页
+            resp.sendRedirect("/");
+        } catch (SQLException e) {
+            throw new ServletException(e);
+        }
+    }
+}
+**************************************************
+@WebServlet("/register")
+public class UserRegisterServlet extends HttpServlet {
+    private UserService userService;
+
+    @Override
+    public void init() throws ServletException {
+        // Servlet 生命周期的内容
+        userService = new UserService();
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        // 每次都带上 utf-8 的设置，字符集不会出问题
+        req.setCharacterEncoding("utf-8");
+        String username = req.getParameter("username");
+        String password = req.getParameter("password");
+        // 没有做参数正确性检查
+
+        try {
+            User user = userService.register(username, password);
+            if (user == null) {
+                // 没有注册成功
+                // 没有做太多易用性考虑：没有告诉用户错误原因
+                resp.sendRedirect("/register.html");
+                return;
+            }
+
+            // 把当前用户种入 session 中，下次资源访问时携带的登陆用户信息
+            HttpSession session = req.getSession();
+            session.setAttribute("user", user);
+
+            // 跳转回首页
+            resp.sendRedirect("/");
+        } catch (SQLException e) {
+            throw new ServletException(e);
+        }
+    }
+}
+******************************************
+public class DB {
+    private static volatile DataSource dataSource = null;
+
+    private static DataSource initDataSource() {
+        MysqlDataSource mysqlDataSource = new MysqlDataSource();
+        mysqlDataSource.setServerName("127.0.0.1");
+        mysqlDataSource.setPort(3306);
+        mysqlDataSource.setUser("root");
+        mysqlDataSource.setPassword("");
+        mysqlDataSource.setDatabaseName("tingshu");
+        mysqlDataSource.setCharacterEncoding("utf8");
+        mysqlDataSource.setUseSSL(false);
+
+        return mysqlDataSource;
+    }
+
+    public static Connection getConnection() throws SQLException {
+        if (dataSource == null) {
+            synchronized (DB.class) {
+                if (dataSource == null) {
+                    dataSource = initDataSource();
+                }
+            }
+        }
+
+        return dataSource.getConnection();
+    }
+}
